@@ -1,4 +1,3 @@
-
 <h1><img src="https://flagcdn.com/w80/tr.png" width="45" valign="middle"> Kurumsal On-Prem RAG & Doküman Zekası Platformu</h1>
 
 Tamamen kendi altyapınızda çalışan (self-hosted), üretim standartlarında bir Retrieval-Augmented Generation (RAG) platformudur. PDF dokümanlarınızı yükleyin, metinleri parçalara (chunk) ayırın, vektör veritabanında indeksleyin ve sayfa düzeyinde kaynak gösterimi (citation) ile dokümanlarınızla güvenli bir şekilde sohbet edin — hiçbir veriniz kurum dışına çıkmaz.
