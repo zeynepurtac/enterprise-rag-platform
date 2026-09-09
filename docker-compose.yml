@@ -1,0 +1,133 @@
+name: enterprise-rag-platform
+
+services:
+  # ---------------------------------------------------------------- Postgres
+  postgres:
+    image: postgres:16-alpine
+    container_name: rag-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ragpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-ragplatform}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-ragplatform}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [rag-net]
+
+  # ------------------------------------------------------------------ Qdrant
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: rag-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks: [rag-net]
+
+  # ------------------------------------------------------------------ Ollama
+  ollama:
+    image: ollama/ollama:latest
+    container_name: rag-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks: [rag-net]
+    # ---- GPU acceleration (optional) -------------------------------------
+    # Uncomment the block below and install the NVIDIA Container Toolkit to run
+    # inference on a GPU instead of the CPU.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ----------------------------------------------- Ollama model bootstrapper
+  # One-shot service that pulls the chat + embedding models, then exits. The
+  # backend waits for it to finish so the first request never hits a missing
+  # model.
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: rag-ollama-init
+    depends_on:
+      - ollama
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      CHAT_MODEL: ${CHAT_MODEL:-llama3.2}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Waiting for Ollama to become available...";
+        until ollama list >/dev/null 2>&1; do sleep 2; done;
+        echo "Pulling chat model: $${CHAT_MODEL}";
+        ollama pull "$${CHAT_MODEL}";
+        echo "Pulling embedding model: $${EMBED_MODEL}";
+        ollama pull "$${EMBED_MODEL}";
+        echo "Model bootstrap complete.";
+    restart: "no"
+    networks: [rag-net]
+
+  # ----------------------------------------------------------------- Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rag-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      ollama-init:
+        condition: service_completed_successfully
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      Database__Provider: postgres
+      Database__ConnectionString: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-ragplatform};Username=${POSTGRES_USER:-rag};Password=${POSTGRES_PASSWORD:-ragpassword}"
+      Ai__BaseUrl: "http://ollama:11434/v1"
+      Ai__ChatModel: ${CHAT_MODEL:-llama3.2}
+      Ai__EmbeddingModel: ${EMBED_MODEL:-nomic-embed-text}
+      Ai__EmbeddingDimensions: ${EMBED_DIMENSIONS:-768}
+      Qdrant__BaseUrl: "http://qdrant:6333"
+      Qdrant__CollectionName: document_chunks
+      Storage__UploadsPath: /app/data/uploads
+    volumes:
+      - backend_uploads:/app/data/uploads
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    networks: [rag-net]
+
+  # ---------------------------------------------------------------- Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: rag-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-8081}:80"
+    networks: [rag-net]
+
+volumes:
+  pg_data:
+  qdrant_data:
+  ollama_data:
+  backend_uploads:
+
+networks:
+  rag-net:
+    driver: bridge

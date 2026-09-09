@@ -1,0 +1,23 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+backend/**/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Node / Angular
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+
+# Env & IDE
+.env
+.vs/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
