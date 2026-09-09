@@ -1,4 +1,170 @@
-# Enterprise On-Prem RAG & Document Intelligence Platform
+
+<h1><img src="https://flagcdn.com/w80/tr.png" width="45" valign="middle"> Kurumsal On-Prem RAG & Doküman Zekası Platformu</h1>
+
+Tamamen kendi altyapınızda çalışan (self-hosted), üretim standartlarında bir Retrieval-Augmented Generation (RAG) platformudur. PDF dokümanlarınızı yükleyin, metinleri parçalara (chunk) ayırın, vektör veritabanında indeksleyin ve sayfa düzeyinde kaynak gösterimi (citation) ile dokümanlarınızla güvenli bir şekilde sohbet edin — hiçbir veriniz kurum dışına çıkmaz.
+
+Tüm sistem tek bir "docker compose up" komutuyla ayağa kalkar.
+
+--------------------------------------------------------------------------------
+
+✨ Öne Çıkan Özellikler
+
+- Varsayılan olarak On-Premise — Ollama ile yerel LLM ve embedding kullanımı; kod değişikliği gerektirmeden yalnızca konfigürasyon ile OpenAI uyumlu servis geçişi.
+- Clean Architecture .NET 9 Backend — Domain, Application, Infrastructure ve API katmanları ile modüler ve sürdürülebilir mimari.
+- Qdrant ile Semantik Arama — Cosine similarity tabanlı vektör araması ve metaveri filtreleme.
+- Gerçek Zamanlı Yanıt Yayınlama (Streaming) — Server-Sent Events (SSE) protokolü üzerinden token tabanlı canlı yanıt akışı.
+- Doğrulanmış Kaynak Gösterimi — Üretilen her yanıtta ilgili dosya adı, sayfa numarası ve benzerlik skoru ile kaynak parçacığı gösterimi.
+- Asenkron İşleme Pipeline'ı — Doküman yüklemeleri anında 202 Accepted döner; metin çıkarma, embedding ve indeksleme arka plan servislerinde gerçekleşir.
+- Modern Angular UI — Sürükle-bırak doküman yükleme, durum takibi ve sohbet arayüzü.
+
+--------------------------------------------------------------------------------
+
+🏗️ Mimari
+
+[Client: Angular SPA (nginx)] -- REST / SSE --> [API: ASP.NET Core 9 Web API]
+API Katmanı Bileşenleri: Documents Controller, Chat Controller, Background Ingestion Queue, RAG Service.
+
+Pipeline (Ingestion):
+PDF Processing (iText7 + chunking) -> Embedding Service -> Ollama (embeddings) / Qdrant (upsert vectors).
+
+Sorgulama Akışı:
+Chat Controller -> RAG Service -> Ollama (embed query) -> Qdrant (similarity search) -> Ollama (grounded prompt).
+
+İstek Yaşam Döngüsü (Request Lifecycle):
+1. Yükleme (Upload): POST /api/documents isteği PDF dosyasını kaydeder, veritabanında Pending durumunda bir kayıt oluşturur ve arka plan iş kuyruğuna ekler (anında 202 Accepted döner).
+2. İşleme (Ingest): Arka plan servisi sayfa bazlı metin çıkarır (iText 7), metinleri örtüşen parçalara (chunk) böler, embedding oluşturur ve vektörleri Qdrant'a kaydeder. Durum Pending -> Processing -> Completed/Failed olarak güncellenir.
+3. Sorgulama (Ask): POST /api/chat/stream soru metninin embedding'ini alır, en yakın K adet parçayı getirir, bağlam içeren prompt oluşturur ve yanıtı kaynak gösterimleriyle birlikte canlı olarak yayınlar.
+
+--------------------------------------------------------------------------------
+
+🧱 Teknoloji Yığını
+
+- Arayüz (Frontend): Angular 19 (standalone bileşenler, signals), nginx
+- Backend: .NET 9, ASP.NET Core Web API, Clean Architecture
+- ORM / Metaveri: Entity Framework Core 9, PostgreSQL (Yerel geliştirme için SQLite)
+- Vektör Veritabanı: Qdrant (HTTP REST API, cosine uzaklığı)
+- LLM & Embedding: Ollama (llama3.2, nomic-embed-text) — OpenAI uyumlu
+- PDF İşleme: iText 7
+- API Dokümantasyonu: Swagger / OpenAPI (Swashbuckle)
+- Orkestrasyon: Docker & Docker Compose
+
+--------------------------------------------------------------------------------
+
+🚀 Hızlı Başlangıç
+
+Ön Gereksinimler:
+- Docker ve Docker Compose v2
+- Model ve imajlar için ~8 GB boş disk alanı (yalnızca ilk kurulumda)
+- (Opsiyonel) Daha hızlı çıkarım (inference) için NVIDIA GPU + Container Toolkit
+
+Çalıştırma:
+git clone https://github.com/zeynepurtac/enterprise-rag-platform.git
+cd enterprise-rag-platform
+cp .env.example .env
+docker compose up --build
+
+İlk çalıştırmada ollama-init servisi sohbet ve embedding modellerini indirir (birkaç GB). Bu tek seferlik bir işlemdir; sonraki çalıştırmalar modeller volume üzerinde saklandığı için hızlı gerçekleşir. İlerleme durumunu takip etmek için: "docker compose logs -f ollama-init".
+
+Servis Adresleri:
+- Arayüz (UI): http://localhost:8081
+- API Servisi: http://localhost:8080
+- Swagger UI: http://localhost:8080/swagger
+- Qdrant Paneli: http://localhost:6333/dashboard
+
+--------------------------------------------------------------------------------
+
+🔌 API Referansı
+
+GET    /api/documents       : Tüm dokümanları listeler (en yeni ilk)
+GET    /api/documents/{id}  : Tek bir dokümanı ve işlenme durumunu getirir
+POST   /api/documents       : PDF yükler (multipart/form-data, file)
+DELETE /api/documents/{id}  : Dokümanı ve ilişkili vektörleri siler
+POST   /api/chat            : Soru sorar (tamamlanmış JSON yanıtı döner)
+POST   /api/chat/stream     : Soru sorar (SSE canlı akış yanıtı döner)
+GET    /health              : Servis sağlık kontrolü (Liveness probe)
+
+Örnek İstek (cURL):
+curl -X POST http://localhost:8080/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+        "question": "Sözleşmenin fesih şartları nelerdir?",
+        "documentId": null,
+        "history": []
+      }'
+
+--------------------------------------------------------------------------------
+
+⚙️ Konfigürasyon
+
+Ai__BaseUrl               : http://ollama:11434/v1 (OpenAI uyumlu LLM servis adresi)
+Ai__ApiKey                : (boş) (Bearer anahtarı - OpenAI için gerekli)
+Ai__ChatModel             : llama3.2 (Sohbet / üretim modeli)
+Ai__EmbeddingModel        : nomic-embed-text (Embedding modeli)
+Ai__EmbeddingDimensions   : 768 (Embedding model boyutuyla eşleşmelidir)
+Qdrant__BaseUrl           : http://qdrant:6333 (Vektör veritabanı adresi)
+Database__Provider        : postgres (postgres veya sqlite)
+Rag__TopK                 : 5 (Soru başına getirilecek parça sayısı)
+Rag__MinScore             : 0.25 (Parça kullanımı için minimum benzerlik skoru)
+Chunking__MaxTokens       : 450 (Hedef parça boyutu - yaklaşık token)
+Chunking__OverlapTokens   : 80 (Ardışık parçalar arasındaki örtüşme miktarı)
+
+OpenAI Kullanımı İçin Ayarlar (backend servisinde):
+Ai__BaseUrl: https://api.openai.com/v1
+Ai__ApiKey: sk-...
+Ai__ChatModel: gpt-4o-mini
+Ai__EmbeddingModel: text-embedding-3-small
+Ai__EmbeddingDimensions: 1536
+
+--------------------------------------------------------------------------------
+
+🧑‍💻 Yerel Geliştirme (Docker Olmadan)
+
+Backend:
+cd backend
+dotnet run --project src/RagPlatform.Api
+
+Frontend:
+cd frontend
+npm install
+npm start
+
+--------------------------------------------------------------------------------
+
+📂 Proje Yapısı
+
+enterprise-rag-platform/
+├── docker-compose.yml         # Tüm sistem orkestrasyonu
+├── .env.example               # Port, kimlik ve model konfigürasyonları
+├── backend/                   # .NET 9 Clean Architecture çözümü
+│   ├── Dockerfile
+│   └── src/
+│       ├── RagPlatform.Domain/          # Varlıklar (Entities), enum'lar
+│       ├── RagPlatform.Application/     # Arayüzler (Interfaces), DTO'lar, modeller
+│       ├── RagPlatform.Infrastructure/  # EF Core, Qdrant, Ollama, RAG, veri işleme
+│       └── RagPlatform.Api/             # Controller'lar, Program.cs, Swagger
+└── frontend/                  # Angular 19 SPA
+    ├── Dockerfile
+    ├── nginx.conf             # SPA yönlendirmesi + /api reverse proxy
+    └── src/app/
+        ├── core/              # Modeller ve servisler
+        └── features/          # Doküman yönetimi paneli + Sohbet alanı
+
+--------------------------------------------------------------------------------
+
+🔍 Bu Platformda RAG Nasıl Çalışır?
+
+1. Örtüşmeli Parçalama (Chunking with Overlap): İlgili cümlelerin bir arada kalmasını sağlar ve bağlam kaybını önleyerek arama kalitesini artırır.
+2. Sayfa Bazlı İndeksleme: Her vektör hangi sayfadan çıkarıldığını bilir; böylece kaynak gösterimleri doğrudan PDF'teki doğru sayfaya işaret eder.
+3. Eşik Skoru (Relevance Floor): Rag__MinScore ayarı ile zayıf eşleşmeler filtrelenir; yeterli bağlam bulunamadığında model uydurma yanıtlar (hallucination) vermek yerine bilgi bulunamadığını bildirir.
+4. Sınırlandırılmış Sistem Prompt'u: Modele yalnızca sağlanan bağlamı kullanması ve kaynakları numara ile doğrulanabilir şekilde belirtmesi talimatı verilir.
+
+--------------------------------------------------------------------------------
+
+📝 Lisans
+Bu proje MIT Lisansı (LICENSE) kapsamında lisanslanmıştır.
+
+-----------------------------------------------------------------------------------
+<h1><img src="https://flagcdn.com/w80/gb.png" width="45" valign="middle"> Enterprise On-Prem RAG & Document Intelligence Platform</h1>
 
 A production-style, fully self-hosted **Retrieval-Augmented Generation (RAG)**
 platform. Upload PDFs, have them chunked, embedded and indexed into a vector
